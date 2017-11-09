@@ -1,0 +1,104 @@
+---
+title: "Predicting Activies from Fitness Trackers"
+author: "Philip Tabak"
+date: "November 7, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret)
+library(pander)
+library(gbm)
+```
+
+
+# Can machine learning techniques be used to predict excercise types?
+
+## Data Exploration and Preperation
+My first step was to load and examine the data. On initial inspection I observed a number of time stamp and identification columns, as well as a many blanks or NAs. A quick column count in excel let me to a list of columns that appeared to sensor readings and appeared to be present for each observation. After I loaded the data, I subsetted the relevant columns in a data frame *t* and verified that they were all in fact complete cases. I then looked at all of the column names to confirm that I only select sensor data.
+
+
+```{r load_data}
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+
+cols <-c(8:10,37:49,60:68, 84:86, 113:124, 140, 151:160)
+t<- training[,cols]
+
+match_count = sum(complete.cases(t)) == nrow(t)
+```
+Does the number of complete cases match the number of observations in the training set? **`r match_count`**
+
+The following columns have been selected: 
+
+```{r col_names, echo = FALSE}
+colnames(training)[cols]
+```
+
+##Building a Prelimnary Model
+Next, I built a model using Stochastic Gradient Boosting. This was pretty arbitrary but I knew this to be a reasonable classification method and I was curious how long it would take given the size of the data set. I planned on submitting my predictions to the quiz, expecting to get around 50% correct and hoping to get 70% or better. I would also have a good idea of how long it would take to build a model with data this size.
+
+```{r prelimenary_model, message=FALSE, warning=FALSE, cache=TRUE}
+
+start <- Sys.time()
+garbage <- capture.output(model_gbm <- train(classe ~., data = t, method = "gbm", na.action = na.exclude)) #capturing the output prevents a huge dump 
+end <- Sys.time()
+
+p <- predict(model_gbm, testing[,cols])
+```
+Time to build model: **`r round(end - start,2)`** minutes.
+
+Predictions: `r p`.
+
+I was surprised when the predicts were plugged into the quiz, to see a score of 100%.
+
+As pleased as I was, I do not believe this to be sufficient analysis. It's worth taking some time to explore this model and try to determine why it was so accurate and could we have achieved similar results without as much luck?
+
+##Model Analysis
+Would the model have performed as well had I split that data into training and test sets and treated the ultimate test data as out of sample verification? How would this model compare to the first?
+
+```{r model_with_Data_split, cache = TRUE}
+
+set.seed(7878)
+
+inTrain <- createDataPartition(y = t$classe, p = 0.7, list = FALSE)
+subset.train <- t[inTrain,]
+subset.test <- t[-inTrain,]
+
+garbage <- capture.output(model_gbm_split <- train(classe ~., data = subset.train, method = "gbm", na.action = na.exclude))
+
+p_split <- predict(model_gbm, subset.test)
+
+```
+
+
+Below we can see that the model built by splitting the training data has over 95% accuracy when predicting the test data and matches the original model on the verification data.
+```{r examining_models}
+confusionMatrix(p_split, subset.test$classe)
+
+p2 <- predict(model_gbm_split, testing[,cols])
+
+p == p2
+```
+
+
+```{r}
+s <- summary.gbm(model_gbm$finalModel, plotit = FALSE)
+s_split <- summary.gbm(model_gbm_split$finalModel, plotit = FALSE)
+
+d <- data.frame(Seonsor = s$var[1:5], Weight = s$rel.inf[1:5])
+d_split <- data.frame(Seonsor = s_split$var[1:5], Weight = s_split$rel.inf[1:5])
+
+#Top Five Predictors in both models
+d
+d_split
+
+```
+
+Of note, in the first model, the top five predictors bear `r round(sum(s$rel.inf[1:5]),2)`% and `r round(sum(s_split$rel.inf[1:5]),2)`% for the split data model. The first model as `r sum(s$rel.inf==0)` predictors with no weight and the split data model has `r sum(s_split$rel.inf == 0)`.
+
+##Conclusion
+All in all these two models look very similar, and there was negligible impact in splitting out 30% of the initial training set for test purposes.
+
+I got extremely lucky with my preliminary model, this will not be the usual case. I was expecting to have to do much more experimentation on finding a more accurate model. Were this the case it would have been necessary to chop the training data down into smaller chunks. Thirty minutes to build a single model makes interactive experimentation very difficult.
